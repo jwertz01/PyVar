@@ -7,7 +7,7 @@ annotator.
 
 Requirements: matplotlib, matplotlib_venn, numpy
 
-Usage:
+##Usage
 
   --anv_multianno_txt_filenames: Tab-separated text files output by table_annovar.pl.
   
