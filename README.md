@@ -5,7 +5,9 @@ outputs an HTML file containing annotator comparison plots,
 and a text file containing annotations of each individual variant by each
 annotator.
 
-Requirements: matplotlib, matplotlib_venn, numpy
+##Requirements
+
+matplotlib, matplotlib_venn, numpy
 
 ##Usage
 
