@@ -7,7 +7,11 @@ annotator.
 
 ##Requirements
 
-matplotlib, matplotlib_venn, numpy
+matplotlib (http://matplotlib.org/)
+
+matplotlib_venn (https://pypi.python.org/pypi/matplotlib-venn)
+
+numpy (http://www.numpy.org/)
 
 ##Usage
 
