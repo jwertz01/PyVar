@@ -37,4 +37,4 @@ numpy (http://www.numpy.org/)
 ##Examples
 python compare_annotators.py --anv_var_func_filenames annovar/gatk3.3HCensAnnovar.variant_function --anv_exonic_var_func_filenames annovar/1463_15_HC_ens/gatk3.3HCensAnnovar.exonic_variant_function --vep_txt_filenames vep/1463_15_gatk3.3HC_ens.vep --filegroup_1 gatk3.3HCensAnnovar.exonic_variant_function gatk3.3HCensAnnovar.variant_function
 
-python compare_annotators.py --anv_multianno_txt_filenames annovar/gatk3.3HCrefseqAnnovar.hg19_multianno.txt --vep_txt_filenames vep/1463_15_gatk3.3HC_ens.vep --out_txt_filepath out.txt --out_html_filepath out.html
+python compare_annotators.py --anv_multianno_txt_filenames annovar/gatk3.3HCrefseqAnnovar.hg19_multianno.txt --vep_txt_filenames vep/1463_15_gatk3.3HC_refseq.vep --out_txt_filepath out.txt --out_html_filepath out.html
