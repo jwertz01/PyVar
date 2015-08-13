@@ -40,7 +40,7 @@ class AnnotationFile(object):
     """General class: Output file from annotator."""
     def __init__(
         self, annotator=None, delimiter=None, file_obj=None,
-        header_list = None, curr_variant=None, next_variant=None,
+        header_list=None, curr_variant=None, next_variant=None,
         has_header=None
     ):
         self.annotator = annotator
@@ -167,7 +167,7 @@ class VEPTxt(AnnotationFile):
             'Feature_type' in h and 'Feature' in h and
             var_list[h.index('Feature_type')] == 'Transcript'
         ):
-            v.transcript = [var_list[h.index('Feature')]]
+            v.transcript = [var_list[h.index('Feature')].split('.')[0]]
 
 
 consequence_names = {
@@ -179,8 +179,8 @@ consequence_names = {
         'stoploss' : 'stoploss',
         'splicing' : 'splicing',
         'exonic;splicing' : 'splicing',
-        'nonframeshift deletion' : 'inframe',
-        'nonframeshift insertion' : 'inframe',
+        'nonframeshift deletion' : 'inframe_deletion',
+        'nonframeshift insertion' : 'inframe_insertion',
         'nonsynonymous SNV' : 'nonsynonymous',
         'nonframeshift_block_substitution' : 'nonsynonymous',
         'synonymous SNV' : 'synonymous',
@@ -194,11 +194,10 @@ consequence_names = {
         'intergenic' : 'intergenic',
         'ncRNA_exonic' : 'nc_exon',
         'ncRNA_intronic' : 'nc_intron',
-        'ncRNA_splicing' : 'nc_splicing',
-        'ncRNA_exonic;splicing' : 'nc_splicing',
-        'ncRNA_UTR3' : 'nc_UTR3',
-        'ncRNA_UTR5' : 'nc_UTR5'
+        'ncRNA_splicing' : 'splicing',
+        'ncRNA_exonic;splicing' : 'splicing',
     },
+    # sequence ontology
     'vep': {
         'frameshift_variant' : 'frameshift',
         'stop_gained' : 'stopgain',
@@ -206,8 +205,10 @@ consequence_names = {
         'splice_donor_variant' : 'splicing',
         'splice_acceptor_variant' : 'splicing',
         'splice_region_variant' : 'splicing',
-        'inframe_insertion' : 'inframe',
-        'inframe_deletion' : 'inframe',
+        'inframe_insertion' : 'inframe_insertion',
+        'disruptive_inframe_insertion' : 'inframe_insertion',
+        'inframe_deletion' : 'inframe_deletion',
+        'disruptive_inframe_deletion' : 'inframe_deletion',
         'initiator_codon_variant' : 'nonsynonymous',
         'missense_variant' : 'nonsynonymous',
         'incomplete_terminal_codon_variant' : 'nonsynonymous',
@@ -215,21 +216,22 @@ consequence_names = {
         'stop_retained_variant' : 'synonymous',
         '3_prime_UTR_variant' : 'UTR3',
         '5_prime_UTR_variant' : 'UTR5',
+        '5_prime_UTR_premature_start_codon_gain_variant' : 'UTR5',
         'upstream_gene_variant' : 'upstream',
         'downstream_gene_variant' : 'downstream',
         'intron_variant' : 'intron',
         'intergenic_variant' : 'intergenic',
         'non_coding_transcript_exon_variant': 'nc_exon',
         'non_coding_transcript_variant': 'nc_intron',
-        # not included: 'nc_splicing', 'nc_UTR3', 'nc_UTR5'
-    }
+    },
 }
+consequence_names['varseq'] = consequence_names['vep']
 
 severity_ranking = [
-    'frameshift', 'stopgain', 'stoploss', 'splicing', 'inframe',
-    'nonsynonymous', 'synonymous', 'UTR5', 'UTR3', 'nc_exon', 'nc_splicing',
-    'intron', 'nc_intron',  'upstream', 'downstream', 'nc_UTR5', 'nc_UTR3',
-    'intergenic', 'None'
+    'frameshift', 'stopgain', 'stoploss', 'splicing', 'inframe_insertion',
+    'inframe_deletion', 'nonsynonymous', 'synonymous', 'UTR5', 'UTR3',
+    'nc_exon', 'intron', 'nc_intron', 'upstream', 'downstream', 'intergenic',
+    'None'
 ]
 
 
@@ -247,7 +249,8 @@ def main():
         all_norm_consq
     ) = init_files(files, args.out_txt_filepath, file_groups)
 
-    process_files(files, out_file, file_combo_counts)
+    #process_files(files, out_file, file_combo_counts)
+    file_combo_counts = {'norm_consq_per_type': {('gatk3.3HCrefseqAnnovar.variant_function;gatk3.3HCrefseqAnnovar.exonic_variant_function',): {'splicing': 50, 'stoploss': 0, 'downstream': 46, 'stopgain': 0, 'UTR5': 84, 'nonsynonymous': 141, 'synonymous': 106, 'intergenic': 1086, 'UTR3': 58, 'frameshift': 14, 'inframe_deletion': 3, 'upstream': 74, 'nc_intron': 232, 'nc_exon': 88, 'intron': 1138, 'inframe_insertion': 3}, ('1463_15_gatk3.3HC_refseq.vep', 'gatk3.3HCrefseqAnnovar.variant_function;gatk3.3HCrefseqAnnovar.exonic_variant_function'): {'splicing': 1017, 'stoploss': 7, 'downstream': 2530, 'stopgain': 70, 'UTR5': 2654, 'nonsynonymous': 9570, 'synonymous': 10277, 'intergenic': 2876, 'UTR3': 3647, 'frameshift': 122, 'inframe_deletion': 167, 'upstream': 2296, 'nc_intron': 2677, 'nc_exon': 1254, 'intron': 83539, 'inframe_insertion': 126}, ('1463_15_gatk3.3HC_refseq.vep',): {'splicing': 85, 'stoploss': 16, 'downstream': 134, 'stopgain': 7, 'UTR5': 61, 'nonsynonymous': 383, 'synonymous': 218, 'intergenic': 216, 'UTR3': 27, 'frameshift': 76, 'inframe_deletion': 8, 'upstream': 169, 'nc_intron': 798, 'nc_exon': 0, 'intron': 1089, 'inframe_insertion': 2}}, 'transcripts': {('gatk3.3HCrefseqAnnovar.variant_function;gatk3.3HCrefseqAnnovar.exonic_variant_function',): 5891, ('1463_15_gatk3.3HC_refseq.vep', 'gatk3.3HCrefseqAnnovar.variant_function;gatk3.3HCrefseqAnnovar.exonic_variant_function'): 120457, ('1463_15_gatk3.3HC_refseq.vep',): 2573}, 'norm_consq': {('gatk3.3HCrefseqAnnovar.variant_function;gatk3.3HCrefseqAnnovar.exonic_variant_function',): 3123, ('1463_15_gatk3.3HC_refseq.vep', 'gatk3.3HCrefseqAnnovar.variant_function;gatk3.3HCrefseqAnnovar.exonic_variant_function'): 122829, ('1463_15_gatk3.3HC_refseq.vep',): 3289}, 'consq_mismatch_pairs': {('stoploss', 'downstream'): 1, ('synonymous', 'synonymous'): 10870, ('nonsynonymous', 'synonymous'): 82, ('UTR5', 'inframe_insertion'): 1, ('nc_exon', 'UTR5'): 16, ('upstream', 'UTR3'): 2, ('nc_exon', 'downstream'): 19, ('stoploss', 'splicing'): 1, ('synonymous', 'intergenic'): 42, ('inframe_insertion', 'intron'): 1, ('nonsynonymous', 'None'): 153, ('nc_exon', 'nc_exon'): 1651, ('upstream', 'intron'): 35, ('intron', 'intergenic'): 646, ('intergenic', 'None'): 38, ('nc_exon', 'nc_intron'): 16, ('frameshift', 'splicing'): 45, ('stoploss', 'UTR3'): 1, ('nc_exon', 'intron'): 337, ('intron', 'upstream'): 248, ('frameshift', 'UTR5'): 9, ('splicing', 'splicing'): 1039, ('intergenic', 'nonsynonymous'): 4, ('synonymous', 'UTR3'): 20, ('UTR5', 'upstream'): 123, ('inframe_deletion', 'splicing'): 2, ('frameshift', 'intergenic'): 1, ('frameshift', 'downstream'): 10, ('splicing', 'nonsynonymous'): 231, ('synonymous', 'intron'): 90, ('UTR5', 'nc_exon'): 14, ('nc_exon', 'None'): 25, ('inframe_insertion', 'intergenic'): 1, ('intron', 'None'): 10, ('splicing', 'None'): 13, ('UTR3', 'nonsynonymous'): 3, ('intron', 'intron'): 81460, ('stopgain', 'nonsynonymous'): 2, ('None', 'intergenic'): 10, ('stoploss', 'synonymous'): 1, ('intron', 'nc_intron'): 1544, ('frameshift', 'upstream'): 5, ('frameshift', 'UTR3'): 7, ('upstream', 'nc_exon'): 3, ('frameshift', 'frameshift'): 171, ('intergenic', 'UTR5'): 13, ('stopgain', 'UTR5'): 1, ('splicing', 'upstream'): 7, ('UTR5', 'intergenic'): 6, ('frameshift', 'intron'): 36, ('None', 'frameshift'): 1, ('downstream', 'synonymous'): 1, ('stoploss', 'intergenic'): 2, ('nonsynonymous', 'intron'): 237, ('nonsynonymous', 'nc_intron'): 4, ('nonsynonymous', 'nc_exon'): 15, ('synonymous', 'upstream'): 17, ('upstream', 'nc_intron'): 31, ('frameshift', 'nc_intron'): 1, ('splicing', 'inframe_insertion'): 2, ('intron', 'inframe_insertion'): 2, ('nonsynonymous', 'nonsynonymous'): 9822, ('None', 'UTR5'): 3, ('downstream', 'intron'): 24, ('nc_exon', 'synonymous'): 6, ('UTR5', 'intron'): 288, ('UTR3', 'nc_exon'): 9, ('downstream', 'nc_intron'): 16, ('intergenic', 'UTR3'): 2, ('downstream', 'nc_exon'): 4, ('UTR5', 'frameshift'): 1, ('downstream', 'UTR3'): 15, ('synonymous', 'None'): 87, ('upstream', 'nonsynonymous'): 2, ('nonsynonymous', 'intergenic'): 97, ('inframe_deletion', 'intergenic'): 2, ('upstream', 'upstream'): 2010, ('UTR3', 'UTR5'): 2, ('inframe_insertion', 'nc_exon'): 1, ('nc_exon', 'nonsynonymous'): 14, ('nc_exon', 'inframe_deletion'): 1, ('intron', 'splicing'): 7, ('stopgain', 'upstream'): 1, ('nonsynonymous', 'upstream'): 35, ('stoploss', 'None'): 13, ('stopgain', 'stopgain'): 71, ('nonsynonymous', 'downstream'): 31, ('synonymous', 'splicing'): 4, ('nc_exon', 'UTR3'): 12, ('downstream', 'downstream'): 839, ('downstream', 'intergenic'): 46, ('intergenic', 'synonymous'): 2, ('splicing', 'intron'): 1242, ('synonymous', 'nonsynonymous'): 14, ('None', 'UTR3'): 8, ('splicing', 'nc_intron'): 22, ('stoploss', 'stoploss'): 9, ('intron', 'nonsynonymous'): 18, ('inframe_deletion', 'intron'): 3, ('downstream', 'splicing'): 3, ('intergenic', 'downstream'): 14, ('splicing', 'UTR3'): 21, ('UTR3', 'splicing'): 1, ('None', 'nonsynonymous'): 3, ('synonymous', 'stopgain'): 1, ('nonsynonymous', 'splicing'): 2, ('None', 'None'): 1, ('inframe_insertion', 'inframe_insertion'): 158, ('intron', 'UTR5'): 52, ('None', 'downstream'): 2, ('inframe_insertion', 'UTR5'): 2, ('UTR3', 'nc_intron'): 2, ('upstream', 'UTR5'): 20, ('UTR5', 'nonsynonymous'): 12, ('splicing', 'downstream'): 5, ('None', 'synonymous'): 1, ('splicing', 'intergenic'): 24, ('UTR3', 'intergenic'): 16, ('stopgain', 'downstream'): 1, ('upstream', 'intergenic'): 98, ('splicing', 'synonymous'): 256, ('UTR5', 'synonymous'): 2, ('intron', 'downstream'): 90, ('inframe_insertion', 'inframe_deletion'): 2, ('stopgain', 'None'): 4, ('UTR5', 'downstream'): 2, ('synonymous', 'UTR5'): 25, ('nonsynonymous', 'UTR5'): 46, ('UTR5', 'None'): 3, ('splicing', 'nc_exon'): 37, ('splicing', 'inframe_deletion'): 5, ('UTR3', 'downstream'): 59, ('intron', 'frameshift'): 1, ('intron', 'UTR3'): 54, ('None', 'nc_intron'): 5, ('splicing', 'frameshift'): 7, ('None', 'nc_exon'): 4, ('None', 'inframe_deletion'): 1, ('UTR5', 'UTR3'): 17, ('UTR3', 'intron'): 250, ('frameshift', 'None'): 59, ('intron', 'inframe_deletion'): 2, ('intergenic', 'intron'): 48, ('stopgain', 'intron'): 11, ('nc_exon', 'intergenic'): 95, ('intergenic', 'nc_intron'): 49, ('None', 'upstream'): 6, ('intergenic', 'nc_exon'): 11, ('UTR3', 'UTR3'): 4513, ('upstream', 'downstream'): 16, ('UTR3', 'frameshift'): 2, ('stopgain', 'UTR3'): 2, ('inframe_insertion', 'splicing'): 1, ('stoploss', 'nonsynonymous'): 2, ('intron', 'synonymous'): 5, ('nonsynonymous', 'UTR3'): 56, ('downstream', 'upstream'): 6, ('upstream', 'synonymous'): 1, ('nc_exon', 'upstream'): 72, ('synonymous', 'nc_exon'): 4, ('intergenic', 'intergenic'): 2876, ('None', 'inframe_insertion'): 2, ('synonymous', 'nc_intron'): 2, ('synonymous', 'downstream'): 23, ('None', 'intron'): 195, ('inframe_deletion', 'None'): 2, ('UTR5', 'splicing'): 2, ('splicing', 'UTR5'): 35, ('UTR5', 'UTR5'): 2521, ('intron', 'nc_exon'): 50, ('stopgain', 'synonymous'): 1, ('intergenic', 'upstream'): 35, ('frameshift', 'nc_exon'): 3, ('inframe_deletion', 'frameshift'): 4, ('UTR3', 'upstream'): 12, ('inframe_deletion', 'inframe_deletion'): 161, ('frameshift', 'stopgain'): 4}}
     close_files(files, out_file)
 
     image_dir = args.image_dir
@@ -278,14 +281,15 @@ def main():
         'coral', 'greenyellow', 'hotpink', 'rosybrown', 'mediumpurple'
     ]
 
-    #print file_combo_counts
+    print file_combo_counts
     create_pie_chart(
         'Common Transcripts',
         'Percentage of variants that have a common transcript\n(a transcript '
         'that all annotators used for annotation).',
         os.path.join(image_dir, '01_transcr_pie.png'),
         ['Common transcript', 'No common transcript'],
-        [subsets_transcript[-1], sum(subsets_transcript[:-1])],piechart_colors
+        [subsets_transcript[-1], sum(subsets_transcript[:-1])],
+        piechart_colors, .965
     )
     create_venn(
         'Common Transcripts',
@@ -293,7 +297,8 @@ def main():
         'used.\nLeft and right: Variants annotated only with transcripts '
         'other annotator did not use. ',
         os.path.join(image_dir, '02_transcr_venn.png'),
-        set_labels_wrapped, subsets_transcript, filegroup_count
+        set_labels_wrapped, subsets_transcript, filegroup_count,
+        args.weighted_venns, .955
     )
     create_venn(
         'Normalized Consequences',
@@ -303,7 +308,8 @@ def main():
         'Includes only consequences using transcripts common to both '
         'annotators.',
         os.path.join(image_dir, '03_norm_consq_venn.png'),
-        set_labels_wrapped, subsets_consq, filegroup_count
+        set_labels_wrapped, subsets_consq, filegroup_count,
+        args.weighted_venns, .99
     )
 
     # make color map
@@ -314,20 +320,24 @@ def main():
     consq_color_map['other'] = piechart_colors[i + 1]
 
     # make normalized consequence pie charts
-    for i, x in enumerate(grouped_files):
+    for i, x in enumerate(file_combo_counts['norm_consq_per_type'].keys()):
         subsets_consq_percateg = []
         for y in sorted (all_norm_consq):
             subsets_consq_percateg.append(
-                file_combo_counts['norm_consq_per_type'][(x,)][y]
+                file_combo_counts['norm_consq_per_type'][x][y]
             )
         create_pie_chart(
             'Normalized Consequences Per File Group',
-            wrap_str(';\n'.join(x.split(';')), 80),
+            wrap_str(
+                ';\n'.join(x) + '\n\nTotal:%d' % sum(subsets_consq_percateg),
+                80
+            ),
             os.path.join(image_dir, '0%d_consq_pie' % (i + 4)),
             sorted(all_norm_consq), subsets_consq_percateg,
-            piechart_colors, consq_color_map
+            piechart_colors, 1 + .015 * len(';'.join(x).split(';')),
+            consq_color_map
         )
-        curr_image = i + 4
+        curr_image = i + 5
 
     # make heatmaps
     heatmap_data = []
@@ -447,6 +457,13 @@ def parse_arguments(parser):
             'Default: annotators_out_plots.html'
         ), default='annotators_out_plots.html'
     )
+    parser.add_argument(
+        '--weighted_venns', dest='weighted_venns', action='store_true',
+        help=(
+            'Include this option to display weighted Venn diagrams '
+            'in output HTML file. Default: unweighted.'
+        )
+    )
 
     # validate args
     if len(sys.argv) == 1:
@@ -507,7 +524,11 @@ def parse_arguments(parser):
     if args.filegroup_1:
         for x in args.filegroup_1:
             for y in all_filepaths:
-                filetype = [z for z in args_dict if y in args_dict[z]][0]
+                filetype = [
+                    z for z in args_dict if (
+                        isinstance(args_dict[z], list) and y in args_dict[z]
+                    )
+                ][0]
                 if x == y or os.path.basename(y) == x:
                     fg1_paths.append((y, filetype))
                 elif os.path.basename(x) == y:
@@ -520,7 +541,11 @@ def parse_arguments(parser):
                 elif os.path.basename(x) == y:
                     fg2_paths.append(x)
     for x in files_not_in_groups:
-        filetype = [z for z in args_dict if x in args_dict[z]][0]
+        filetype = [
+            z for z in args_dict if (
+                isinstance(args_dict[z], list) and x in args_dict[z]
+            )
+        ][0]
         if not fg1_paths:
             fg1_paths.append((x, filetype))
         elif not fg2_paths:
@@ -884,7 +909,9 @@ def update_file_combo_counts(
                             file_transcr_sets.append(set(curr_transcr))
                     # transcript exists that is present in all files
                     # in filegroup_combo
-                    if set.intersection(*file_transcr_sets):
+                    if set.intersection(*file_transcr_sets) or (
+                        x == 'intergenic'
+                    ):
                         file_combo_counts['norm_consq_per_type'][
                             filegroup_combo
                         ][x] += 1
@@ -944,18 +971,24 @@ def find_subsets(filegroup_count, file_combo_counts, set_labels):
 
 def create_venn(
     plot_title, description, outfile_path, set_labels, subsets,
-    filegroup_count
+    filegroup_count, weighted, suptitle_y=1
 ):
     """Write Venn diagram to outfile_path"""
     plt.clf()
     if filegroup_count == 2:
-        v = matplotlib_venn.venn2_unweighted(
-            set_labels=set_labels, subsets=subsets
-        )
+        if weighted:
+            v = matplotlib_venn.venn2(set_labels=set_labels, subsets=subsets)
+        else:
+            v = matplotlib_venn.venn2_unweighted(
+                set_labels=set_labels, subsets=subsets
+            )
     elif filegroup_count == 3:
-        v = matplotlib_venn.venn3_unweighted(
-            set_labels=set_labels, subsets=subsets
-        )
+        if weighted:
+            v = matplotlib_venn.venn3(set_labels=set_labels, subsets=subsets)
+        else:
+            v = matplotlib_venn.venn3_unweighted(
+                set_labels=set_labels, subsets=subsets
+            )
     else:
         print 'Charts only supported for 2 or 3 files.'
         return
@@ -963,7 +996,7 @@ def create_venn(
     for x in 'ABC'[:filegroup_count]:
         v.get_label_by_id(x).set_size(10)
     plt.suptitle(
-        '%s\n\n' % plot_title, fontdict={'weight':'bold', 'size':'large'}
+        plot_title, fontdict={'weight':'bold', 'size':'large'}, y=suptitle_y
     )
     plt.title(description, fontdict={'size':'small'}, y=.96)
     plt.savefig(outfile_path, bbox_inches='tight', pad_inches=.5)
@@ -971,14 +1004,15 @@ def create_venn(
 
 def create_pie_chart(
         plot_title, description, outfile_path, labels, subsets,
-        default_colors, color_map=None
+        default_colors, suptitle_y=1, color_map=None
     ):
     plt.clf()
     plt.axis('equal')
     plt.suptitle(
-        '%s\n\n' % plot_title, fontdict={'weight':'bold', 'size':'large'}
+        plot_title, fontdict={'weight':'bold', 'size':'large'},
+        y=suptitle_y
     )
-    plt.title(description, fontdict={'size':'small'}, y=.97)
+    plt.title(description, fontdict={'size':'small'}, y=.955)
     most_freq = sorted(zip(labels, subsets), key=operator.itemgetter(1))[::-1]
     categ_limit = 6
     min_percent = 3
@@ -1047,9 +1081,9 @@ def create_heatmap(
 ):
     plt.clf()
     plt.suptitle(
-        '%s\n\n' % plot_title, fontdict={'weight':'bold', 'size':'large'}
+        plot_title, fontdict={'weight':'bold', 'size':'large'}, y=1.001
     )
-    plt.title(description, fontdict={'size':'small'}, y=.98)
+    plt.title(description, fontdict={'size':'small'}, y=.99)
     plt.pcolor(np.array(list_), cmap=plt.cm.Reds, edgecolors='k')
     ax = plt.axes()
     # fix spines
