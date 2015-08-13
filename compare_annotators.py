@@ -169,7 +169,6 @@ class VEPTxt(AnnotationFile):
         ):
             v.transcript = [var_list[h.index('Feature')].split('.')[0]]
 
-
 consequence_names = {
     'annovar': {
         'frameshift deletion' : 'frameshift',
@@ -339,44 +338,27 @@ def main():
         curr_image = i + 5
 
     # make heatmaps
-    heatmap_data = []
-    for x in severity_ranking:
-        row = []
-        for y in severity_ranking:
-            if (x, y) in file_combo_counts['consq_mismatch_pairs']:
-                row.append(
-                    file_combo_counts['consq_mismatch_pairs'][(x, y)]
-                )
-            else:
-                row.append(0)
-        heatmap_data.append(row)
-
-    row_norm_heatmap_data = normalize_2d_list(
-        np.array(heatmap_data).transpose()
-    )
-    col_norm_heatmap_data = normalize_2d_list(heatmap_data)
-
-    wrapped_severity = [
+    axis_titles = [
         wrap_str(';\n'.join(z.split(';')), 50) for z in
         sorted(grouped_files)
     ]
-    heatmap_description_template = (
-        'Counts of most severe normalized consequence identified '
-        'by each annotator.\n(Colors correspond to logarithm of raw counts.) '
-        'Heatmap is normalized per '
+    output_heatmaps(
+        severity_ranking, severity_ranking,
+        file_combo_counts['norm_consq_pairs'], axis_titles, image_dir,
+        curr_image, 'norm_heatmap', True
     )
-    create_heatmap(
-        row_norm_heatmap_data, 'Row-Normalized Consequence Heatmap',
-        heatmap_description_template + 'row.', os.path.join(
-            image_dir, '0%d_heatmap.png' % (curr_image + 1)
-        ), severity_ranking, *wrapped_severity
+    heatmap_data = []
+    xaxis_labels = list(set([x[0] for x in file_combo_counts['consq_pairs']]))
+    sorted_xaxis_labels = sort_unnorm_consq_by_severity(xaxis_labels)
+    yaxis_labels = list(set([x[1] for x in file_combo_counts['consq_pairs']]))
+    sorted_yaxis_labels = sort_unnorm_consq_by_severity(yaxis_labels)
+
+    output_heatmaps(
+        sorted_xaxis_labels, sorted_yaxis_labels,
+        file_combo_counts['consq_pairs'], axis_titles, image_dir,
+        curr_image + 2, 'unnorm_heatmap', False
     )
-    create_heatmap(
-        col_norm_heatmap_data, 'Column-Normalized Consequence Heatmap',
-        heatmap_description_template + 'column.', os.path.join(
-            image_dir, '0%d_heatmap.png' % (curr_image + 2)
-        ), severity_ranking, *wrapped_severity
-    )
+
     create_html(
         args.out_html_filepath, image_dir,
         re.sub(';', ';\n', '\n\nvs.\n\n'.join(grouped_files))
@@ -392,6 +374,26 @@ def get_norm_consequence(annotator, consequence, other_consequence):
             (z in consequence_names[annotator]) else other_consequence
         ) for z in consequence
     ]
+
+
+def sort_unnorm_consq_by_severity(unnorm_consequences):
+    severities = []
+    for x in unnorm_consequences:
+        found_severity = False
+        for y in consequence_names:
+            if x in consequence_names[y]:
+                severity = severity_ranking.index(consequence_names[y][x])
+                found_severity = True
+                break
+        if not found_severity:
+            severity = severity_ranking.index('None')
+        severities.append(severity)
+    sorted_csq = [
+        a for (a, b) in sorted(
+            zip(unnorm_consequences, severities), key=operator.itemgetter(1)
+        )
+    ]
+    return sorted_csq
 
 
 def parse_arguments(parser):
@@ -643,7 +645,7 @@ def init_files(files, out_filename, file_groups):
 
     categs = [
         'transcripts', 'norm_consq', 'norm_consq_per_type',
-        'consq_mismatch_pairs'
+        'norm_consq_pairs', 'consq_pairs'
     ]
     # set up agreement counts for each combination of file groups
     file_combo_counts = {}
@@ -678,7 +680,7 @@ def init_files(files, out_filename, file_groups):
                 ])
                 for z in all_norm_consq:
                     file_combo_counts[x][y][z] = 0
-            elif x == 'consq_mismatch_pairs':
+            elif x in ['norm_consq_pairs', 'consq_pairs']:
                 if len(y) == 1:
                     file_combo_counts[x] = {}
             else:
@@ -823,9 +825,11 @@ def update_file_combo_counts(
     file_categ = {}  # {file: set of file_combo_counts_categ values}
     # {file: list of (transcript, normalized consequence) tuples}
     file_trans_consq = {}
+    file_unnorm_consq = {}
     for grp in file_combo_counts['norm_consq']:
         if len(grp) == 1:
             file_trans_consq[grp[0]] = []
+            file_unnorm_consq[grp[0]] = []
     for v, f in variants_curr_pos:
         filename = os.path.basename(f.file_obj.name)
         if filename not in file_categ:
@@ -840,6 +844,15 @@ def update_file_combo_counts(
                     file_trans_consq[x].append(
                         (v.transcript, v.normalized_consequence)
                     )
+        for x in file_unnorm_consq:
+            if filename in x.split(';'):
+                for y in v.consequence:
+                    if y in consequence_names[f.annotator]:
+                        norm_csq = consequence_names[f.annotator][y]
+                    else:
+                        norm_csq = f.other_consequence
+                    file_unnorm_consq[x].append((y, norm_csq))
+
     if variants_curr_pos:
         chrom = variants_curr_pos[0][0].chrom
         pos = variants_curr_pos[0][0].start_pos
@@ -851,9 +864,10 @@ def update_file_combo_counts(
     filegroup_combos = file_combo_counts[file_combo_counts_categ].keys()
     filegroup_combos.sort(key=len, reverse=True)
 
-    # update heat map counts (consq_mismatch_pairs)
+    # update heat map counts (norm_consq_pairs and consq_pairs)
     if file_combo_counts_categ == 'norm_consq':
-        most_sev_fgroup_consq = []
+        most_sev_consq = []
+        most_sev_unnorm_consq = []
         for f_group in sorted(
             [z[0] for z in filegroup_combos if len(z) == 1]
         ):
@@ -862,15 +876,30 @@ def update_file_combo_counts(
                 if w in file_categ:
                     filegroup_consq = filegroup_consq.union(file_categ[w])
             if filegroup_consq:
-                most_sev_fgroup_consq.append(severity_ranking[min(
+                highest_severity = min(
                     [severity_ranking.index(z) for z in filegroup_consq]
-                )])
+                )
+                most_sev_consq.append(severity_ranking[highest_severity])
+                for (csq, norm_csq) in file_unnorm_consq[f_group]:
+                    if (
+                        norm_csq != 'other' and
+                        severity_ranking.index(norm_csq) == highest_severity
+                    ):
+                        most_sev_unnorm_consq.append(csq)
+                        break
             else:
-                most_sev_fgroup_consq.append('None')
-        dict_key = tuple(most_sev_fgroup_consq)
-        if dict_key not in file_combo_counts['consq_mismatch_pairs']:
-            file_combo_counts['consq_mismatch_pairs'][dict_key] = 0
-        file_combo_counts['consq_mismatch_pairs'][dict_key] += 1
+                most_sev_consq.append('None')
+                most_sev_unnorm_consq.append('None')
+
+        dict_key = tuple(most_sev_consq)
+        if dict_key not in file_combo_counts['norm_consq_pairs']:
+            file_combo_counts['norm_consq_pairs'][dict_key] = 0
+        file_combo_counts['norm_consq_pairs'][dict_key] += 1
+
+        unnorm_dict_key = tuple(most_sev_unnorm_consq)
+        if unnorm_dict_key not in file_combo_counts['consq_pairs']:
+            file_combo_counts['consq_pairs'][unnorm_dict_key] = 0
+        file_combo_counts['consq_pairs'][unnorm_dict_key] += 1
 
     incremented = False
     for i, filegroup_combo in enumerate(filegroup_combos):
@@ -1076,7 +1105,8 @@ def normalize_2d_list(list_):
 
 
 def create_heatmap(
-    list_, plot_title, description, out_path, labels, xlabel, ylabel
+    list_, plot_title, description, out_path, xaxis_labels, yaxis_labels,
+    xaxis_title, yaxis_title
 ):
     plt.clf()
     plt.suptitle(
@@ -1086,14 +1116,14 @@ def create_heatmap(
     plt.pcolor(np.array(list_), cmap=plt.cm.Reds, edgecolors='k')
     ax = plt.axes()
     # fix spines
-    ax.spines['top'].set_bounds(0, len(list_))
-    ax.spines['bottom'].set_bounds(0, len(list_))
+    ax.spines['top'].set_bounds(0, len(list_[0]))
+    ax.spines['bottom'].set_bounds(0, len(list_[0]))
     ax.spines['left'].set_bounds(0, len(list_))
     ax.spines['right'].set_bounds(0, len(list_))
     ax.spines['top'].set_position(('data', len(list_)))
-    ax.spines['right'].set_position(('data', len(list_)))
-    locs1, labels1 = plt.xticks(np.arange(len(list_[0])) + 0.5, labels)
-    plt.yticks(np.arange(len(list_[0])) + 0.5, labels)
+    ax.spines['right'].set_position(('data', len(list_[0])))
+    locs1, labels1 = plt.xticks(np.arange(len(list_[0])) + 0.5, xaxis_labels)
+    plt.yticks(np.arange(len(list_[0])) + 0.5, yaxis_labels)
     plt.setp(labels1, rotation=90)
     plt.tick_params(
         axis='both', top='off', bottom='off', left='off', right='off',
@@ -1101,9 +1131,57 @@ def create_heatmap(
     )
     ax.xaxis.labelpad = 10
     ax.yaxis.labelpad = 10
-    plt.xlabel(xlabel, style='oblique')
-    plt.ylabel(ylabel, style='oblique')
+    plt.xlabel(xaxis_title, style='oblique')
+    plt.ylabel(yaxis_title, style='oblique')
     plt.savefig(out_path, bbox_inches='tight', pad_inches=.5)
+
+
+def output_heatmaps(
+    xaxis_labels, yaxis_labels, pair_counts, axis_titles, image_dir,
+    curr_image, out_basename, normalized_consq
+):
+    heatmap_data = []
+    for x in xaxis_labels:
+        row = []
+        for y in yaxis_labels:
+            if (x, y) in pair_counts:
+                row.append(pair_counts[(x, y)])
+            else:
+                row.append(0)
+        heatmap_data.append(row)
+
+    row_norm_heatmap_data = normalize_2d_list(
+        np.array(heatmap_data).transpose()
+    )
+    col_norm_heatmap_data = np.array(
+        normalize_2d_list(heatmap_data)
+    ).transpose()
+
+    heatmap_description_template = (
+        'Counts of most severe %snormalized consequence identified '
+        'by each annotator.\n(Colors correspond to logarithm of raw counts.) '
+        'Heatmap is normalized per ' % ('' if normalized_consq else 'un')
+    )
+    if curr_image < 9:
+        out_name ='0%d_%s.png' % (curr_image + 1, out_basename)
+    else:
+        out_name = '%d_%s.png' % (curr_image + 1, out_basename)
+    create_heatmap(
+        row_norm_heatmap_data, 'Row-Normalized Consequence Heatmap',
+        heatmap_description_template + 'row.',
+        os.path.join(image_dir, out_name), xaxis_labels, yaxis_labels,
+        *axis_titles
+    )
+    if curr_image < 8:
+        out_name = '0%d_%s.png' % (curr_image + 2, out_basename)
+    else:
+        out_name = '%d_%s.png' % (curr_image + 2, out_basename)
+    create_heatmap(
+        col_norm_heatmap_data, 'Column-Normalized Consequence Heatmap',
+        heatmap_description_template + 'column.',
+        os.path.join(image_dir, out_name), xaxis_labels, yaxis_labels,
+        *axis_titles
+    )
 
 
 def create_html(html_outfile, image_dir, page_subtitle):
@@ -1161,7 +1239,8 @@ def create_html(html_outfile, image_dir, page_subtitle):
             re.sub('\n', '<br>', page_subtitle)
         )
         image_strs = {
-            'heat' : [], 'consq' : [], 'other' : [], 'transcr' : []
+            '_norm_heat':[], 'unnorm_heat':[], 'consq':[], 'other':[],
+            'transcr':[]
         }
         image_fnames = sorted(os.listdir(image_dir))
         for image in image_fnames:
@@ -1194,9 +1273,20 @@ def create_html(html_outfile, image_dir, page_subtitle):
         f.write('</div>')
 
         # consequence heatmaps
-        f.write('<div class="databox databox2"><h2>Consequence Heatmaps</h2>')
-        create_js_slideshow(image_strs['heat'], 'heat', f)
+        f.write(
+            '<div class="databox databox2">'
+            '<h2>Normalized Consequence Heatmaps</h2>'
+        )
+        create_js_slideshow(image_strs['_norm_heat'], 'norm_heat', f)
         f.write('</div>')
+
+        f.write(
+            '<div class="databox databox1">'
+            '<h2>Unnormalized Consequence Heatmaps</h2>'
+        )
+        create_js_slideshow(image_strs['unnorm_heat'], 'unnorm_heat', f)
+        f.write('</div>')
+
 
         if image_strs['other']:
             f.write('<div class="databox databox2">')
