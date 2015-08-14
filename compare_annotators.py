@@ -77,11 +77,11 @@ class AnvMultiannoTxt(AnnotationFile):
         v.start_pos = int(var_list[h.index('Start')])
         v.end_pos = int(var_list[h.index('End')])
         for i, categ in enumerate(h):
-            if re.findall('^Func.*gene', categ):
+            if re.findall('^Func*', categ):
                 func_index = i
-            if re.findall('ExonicFunc.*gene', categ):
+            if re.findall('ExonicFunc*', categ):
                 exonic_func_index = i
-            if re.findall('AAChange.*gene', categ):
+            if re.findall('AAChange*', categ):
                 aa_change_index = i
         func = var_list[func_index].strip('"')
         exonic_func = var_list[exonic_func_index].strip('"')
@@ -168,6 +168,34 @@ class VEPTxt(AnnotationFile):
             var_list[h.index('Feature_type')] == 'Transcript'
         ):
             v.transcript = [var_list[h.index('Feature')].split('.')[0]]
+
+
+class VarSeqTxt(AnnotationFile):
+    """VEP output text file."""
+    def __init__(self, file_obj=None):
+        super(VarSeqTxt, self).__init__(
+            annotator='varseq', delimiter='\t', file_obj=file_obj,
+            has_header=True
+        )
+    def process_next_variant(self):
+        v = self.next_variant
+        h = self.header_list
+        var_list = v.string.split(self.delimiter)
+        loc = var_list[h.index('Chr:Pos')].split(':')
+        v.chrom = 'chr%s' % loc[0]
+        v.start_pos = int(loc[1])
+        v.end_pos = int(loc[1])
+        v.consequence = [var_list[h.index('Sequence Ontology (Combined)')]]
+        v.normalized_consequence = get_norm_consequence(
+            self.annotator, v.consequence, self.other_consequence
+        )
+        if var_list[h.index('Transcript Name')].strip():
+            v.transcript = [
+                var_list[h.index('Transcript Name')].split('.')[0]
+            ]
+        if any(['insertion' in z for z in v.consequence]):
+            v.start_pos -= 1
+
 
 consequence_names = {
     'annovar': {
@@ -423,6 +451,12 @@ def parse_arguments(parser):
         )
     )
     parser.add_argument(
+        '--varseq_txt_filenames', nargs='*',
+        help=(
+            'Tab-separated text files output by Golden Helix\'s VarSeq.'
+        )
+    )
+    parser.add_argument(
         '--filegroup_1', nargs='*', help=(
             'Filenames included in one filegroup, for which variants will '
             'be combined during analysis. Files in groups should '
@@ -527,7 +561,7 @@ def parse_arguments(parser):
             for y in all_filepaths:
                 filetype = [
                     z for z in args_dict if (
-                        isinstance(args_dict[z], list) and y in args_dict[z]
+                        'filenames' in z and y in args_dict[z]
                     )
                 ][0]
                 if x == y or os.path.basename(y) == x:
@@ -537,10 +571,15 @@ def parse_arguments(parser):
     if args.filegroup_2:
         for x in args.filegroup_2:
             for y in all_filepaths:
+                filetype = [
+                    z for z in args_dict if (
+                        'filenames' in z and y in args_dict[z]
+                    )
+                ][0]
                 if x == y or os.path.basename(y) == x:
-                    fg2_paths.append(y)
+                    fg2_paths.append((y, filetype))
                 elif os.path.basename(x) == y:
-                    fg2_paths.append(x)
+                    fg2_paths.append((x, filetype))
     for x in files_not_in_groups:
         filetype = [
             z for z in args_dict if (
@@ -613,6 +652,7 @@ def open_files(args):
         args.anv_exonic_var_func_filenames, AnvExonicVariantFunction, files
     )
     open_filetype(args.vep_txt_filenames, VEPTxt, files)
+    open_filetype(args.varseq_txt_filenames, VarSeqTxt, files)
     return files
 
 
@@ -1123,7 +1163,7 @@ def create_heatmap(
     ax.spines['top'].set_position(('data', len(list_)))
     ax.spines['right'].set_position(('data', len(list_[0])))
     locs1, labels1 = plt.xticks(np.arange(len(list_[0])) + 0.5, xaxis_labels)
-    plt.yticks(np.arange(len(list_[0])) + 0.5, yaxis_labels)
+    plt.yticks(np.arange(len(list_)) + 0.5, yaxis_labels)
     plt.setp(labels1, rotation=90)
     plt.tick_params(
         axis='both', top='off', bottom='off', left='off', right='off',
@@ -1176,6 +1216,7 @@ def output_heatmaps(
         out_name = '0%d_%s.png' % (curr_image + 2, out_basename)
     else:
         out_name = '%d_%s.png' % (curr_image + 2, out_basename)
+
     create_heatmap(
         col_norm_heatmap_data, 'Column-Normalized Consequence Heatmap',
         heatmap_description_template + 'column.',
@@ -1286,7 +1327,6 @@ def create_html(html_outfile, image_dir, page_subtitle):
         )
         create_js_slideshow(image_strs['unnorm_heat'], 'unnorm_heat', f)
         f.write('</div>')
-
 
         if image_strs['other']:
             f.write('<div class="databox databox2">')
