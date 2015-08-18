@@ -90,9 +90,55 @@ class AnvMultiannoTxt(AnnotationFile):
         v.normalized_consequence = get_norm_consequence(
             self.annotator, v.consequence, self.other_consequence
         )
-        if var_list[aa_change_index] not in ['.', 'UNKNOWN']:
+        if var_list[aa_change_index] not in ['.', 'UNKNOWN', 'unknown', '']:
             v.transcript = [
                 z.split(':')[1] for z in var_list[aa_change_index].split(',')
+            ]
+
+
+class AnvMultiannoCSV(AnnotationFile):
+    """Annovar output multianno CSV file."""
+    def __init__(self, file_obj=None,):
+        super(AnvMultiannoCSV, self).__init__(
+            annotator='annovar', delimiter=',', file_obj=file_obj,
+            has_header=True
+        )
+
+    def process_next_variant(self):
+        v = self.next_variant
+        h = self.header_list
+        var_list = []
+        var_string = v.string
+        # handle non-delimiter commas (inside quotes)
+        x = re.findall('"[^,^"]+,[^"]*"', var_string)
+        for y in x:
+            var_string = var_string.replace(y, y.replace(',', '`'))
+        for y in var_string.split(','):
+            y = y.strip().strip('""')
+            var_list.append(y.replace('`', ','))
+        if var_list[h.index('Start')] == 'chrX':
+            print v, var_list
+        v.chrom = var_list[h.index('Chr')]
+        v.start_pos = int(var_list[h.index('Start')])
+        v.end_pos = int(var_list[h.index('End')])
+        for i, categ in enumerate(h):
+            if re.findall('^Func*', categ):
+                func_index = i
+            if re.findall('ExonicFunc*', categ):
+                exonic_func_index = i
+            if re.findall('AAChange*', categ):
+                aa_change_index = i
+        func = var_list[func_index].strip('"')
+        exonic_func = var_list[exonic_func_index].strip('"')
+        dict_key = exonic_func if (func == 'exonic') else func
+        v.consequence = [dict_key]
+        v.normalized_consequence = get_norm_consequence(
+            self.annotator, v.consequence, self.other_consequence
+        )
+        if var_list[aa_change_index] not in ['.', 'UNKNOWN', 'unknown', '']:
+            v.transcript = [
+                z.split(':')[1] for z in
+                var_list[aa_change_index].strip(',').split(',')
             ]
 
 
@@ -138,7 +184,7 @@ class AnvExonicVariantFunction(AnnotationFile):
         v.normalized_consequence = get_norm_consequence(
             self.annotator, v.consequence, self.other_consequence
         )
-        if var_list[2] not in ['.', 'UNKNOWN']:
+        if var_list[2] not in ['.', 'UNKNOWN', 'unknown', '']:
             v.transcript = [
                 z.split(':')[1] for z in var_list[2].strip(',').split(',')
             ]
@@ -193,8 +239,14 @@ class VarSeqTxt(AnnotationFile):
             v.transcript = [
                 var_list[h.index('Transcript Name')].split('.')[0]
             ]
+        # make start pos match with other annotators
         if any(['insertion' in z for z in v.consequence]):
             v.start_pos -= 1
+        if 'Ref/Alt' in h and '/' in var_list[h.index('Ref/Alt')]:
+            ref, alt = var_list[h.index('Ref/Alt')].split('/')[:2]
+            # frameshift insertion
+            if ref == '-' and 'frameshift_variant' in v.consequence:
+                v.start_pos -=1
 
 
 consequence_names = {
@@ -203,7 +255,9 @@ consequence_names = {
         'frameshift insertion' : 'frameshift',
         'frameshift_block_subsitution' : 'frameshift',
         'stopgain' : 'stopgain',
+        'stopgain SNV' : 'stopgain',
         'stoploss' : 'stoploss',
+        'stoploss SNV' : 'stoploss',
         'splicing' : 'splicing',
         'exonic;splicing' : 'splicing',
         'nonframeshift deletion' : 'inframe_deletion',
@@ -257,7 +311,7 @@ consequence_names['varseq'] = consequence_names['vep']
 severity_ranking = [
     'frameshift', 'stopgain', 'stoploss', 'splicing', 'inframe_insertion',
     'inframe_deletion', 'nonsynonymous', 'synonymous', 'UTR5', 'UTR3',
-    'nc_exon', 'intron', 'nc_intron', 'upstream', 'downstream', 'intergenic',
+    'nc_exon', 'nc_intron', 'intron', 'upstream', 'downstream', 'intergenic',
     'None'
 ]
 
@@ -293,6 +347,9 @@ def main():
         [wrap_str(';\n'.join(x.split(';')), 30) for x in set_labels]
     )
 
+    subsets_pos = find_subsets(
+        filegroup_count, file_combo_counts['positions'], set_labels
+    )
     subsets_transcript = find_subsets(
         filegroup_count, file_combo_counts['transcripts'], set_labels
     )
@@ -309,9 +366,26 @@ def main():
 
     print file_combo_counts
     create_pie_chart(
+        'Common Positions',
+        'Percentage of variants for which annotators agree on\nposition '
+        'of variant.',
+        os.path.join(image_dir, '01_position_pie.png'),
+        ['Position match', 'Position mismatch'],
+        [subsets_pos[-1], sum(subsets_pos[:-1])], piechart_colors, .965
+    )
+    create_venn(
+        'Common Positions',
+        'Middle: Annotators agree on variant position. \n'
+        'Left and right: Variant position included only by given annotator.',
+        os.path.join(image_dir, '02_position_venn.png'),
+        set_labels_wrapped, subsets_pos, filegroup_count,
+        args.weighted_venns, .955
+    )
+    create_pie_chart(
         'Common Transcripts',
-        'Percentage of variants that have a common transcript\n(a transcript '
-        'that all annotators used for annotation).',
+        'Percentage of variants that have a common transcript (a transcript '
+        'that all\nannotators used for annotation). '
+        'Ignores variants with position mismatch.',
         os.path.join(image_dir, '01_transcr_pie.png'),
         ['Common transcript', 'No common transcript'],
         [subsets_transcript[-1], sum(subsets_transcript[:-1])],
@@ -321,18 +395,18 @@ def main():
         'Common Transcripts',
         'Middle: Variants annotated with >=1 transcript that both annotators '
         'used.\nLeft and right: Variants annotated only with transcripts '
-        'other annotator did not use. ',
+        'other annotator did not use. \n(Unknown transcripts not counted.) '
+        'Ignores variants with position mismatch.',
         os.path.join(image_dir, '02_transcr_venn.png'),
         set_labels_wrapped, subsets_transcript, filegroup_count,
-        args.weighted_venns, .955
+        args.weighted_venns, .985
     )
     create_venn(
         'Normalized Consequences',
         'Middle: Variants annotated with >=1 consequence that both '
         'annotators identified.\nLeft and right: Variants annotated only '
         'with consequences other annotator did not identify.\n'
-        'Includes only consequences using transcripts common to both '
-        'annotators.',
+        'Ignores variants with position mismatch or no common transcripts.',
         os.path.join(image_dir, '03_norm_consq_venn.png'),
         set_labels_wrapped, subsets_consq, filegroup_count,
         args.weighted_venns, .99
@@ -428,6 +502,13 @@ def parse_arguments(parser):
     parser.add_argument(
         '--anv_multianno_txt_filenames', nargs='*',
         help='Tab-separated text files output by table_annovar.pl.'
+    )
+    parser.add_argument(
+        '--anv_multianno_csv_filenames', nargs='*',
+        help=(
+            'Comma-separated text files output by table_annovar.pl. '
+            '(Using -csvout option)'
+        )
     )
     parser.add_argument(
         '--anv_var_func_filenames', nargs='*',
@@ -647,6 +728,7 @@ def check_file_grouping(file_grouping, all_filepaths, arg_label, parser):
 def open_files(args):
     files = []
     open_filetype(args.anv_multianno_txt_filenames, AnvMultiannoTxt, files)
+    open_filetype(args.anv_multianno_csv_filenames, AnvMultiannoCSV, files)
     open_filetype(args.anv_var_func_filenames, AnvVariantFunction, files)
     open_filetype(
         args.anv_exonic_var_func_filenames, AnvExonicVariantFunction, files
@@ -685,7 +767,7 @@ def init_files(files, out_filename, file_groups):
 
     categs = [
         'transcripts', 'norm_consq', 'norm_consq_per_type',
-        'norm_consq_pairs', 'consq_pairs'
+        'norm_consq_pairs', 'consq_pairs', 'positions'
     ]
     # set up agreement counts for each combination of file groups
     file_combo_counts = {}
@@ -729,8 +811,8 @@ def init_files(files, out_filename, file_groups):
     out_f = open(out_filename, 'w')
     out_f.write(
         'Annotator\tFilename\tChrom\tStart_pos\tEnd_pos\tConsequence\t'
-        'Normalized_consequence\tTranscript\tCommon_transcript_exists\t'
-        'Consequences_match'
+        'Normalized_consequence\tTranscript\tCommon_position_exists\t'
+        'Common_transcript_exists\tConsequences_match'
     )
     return (
         out_f, empty_files, file_combo_counts, grouped_files, all_norm_consq
@@ -832,21 +914,28 @@ def process_curr_pos(variants_curr_pos, out_file, file_combo_counts):
     Arg: list of (variant obj, file obj) at a single position,
     over different files.
     """
-    common_transcr_exists = update_file_combo_counts(
-        file_combo_counts, variants_curr_pos, 'transcripts', 'transcript'
+    common_pos_exists = update_file_combo_counts(
+        file_combo_counts, variants_curr_pos, 'positions', 'start_pos'
     )
-    matching_norm_consq = update_file_combo_counts(
-        file_combo_counts, variants_curr_pos, 'norm_consq',
-        'normalized_consequence'
-    )
+    common_transcr_exists = 'NA'
+    matching_norm_consq = 'NA'
+    if common_pos_exists:
+        common_transcr_exists = update_file_combo_counts(
+            file_combo_counts, variants_curr_pos, 'transcripts', 'transcript'
+        )
+        if common_transcr_exists:
+            matching_norm_consq = update_file_combo_counts(
+                file_combo_counts, variants_curr_pos, 'norm_consq',
+                'normalized_consequence'
+            )
     for v, f in variants_curr_pos:
         out_file.write(
-            '%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n' % (
+            '%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n' % (
                 f.annotator, os.path.basename(f.file_obj.name),
                 v.chrom, v.start_pos, v.end_pos, ', '.join(v.consequence),
                 ', '.join(v.normalized_consequence),
                 ', '.join(v.transcript) if v.transcript else 'unknown',
-                common_transcr_exists, matching_norm_consq
+                common_pos_exists, common_transcr_exists, matching_norm_consq
             )
         )
     out_file.write('\n')
@@ -874,10 +963,15 @@ def update_file_combo_counts(
         filename = os.path.basename(f.file_obj.name)
         if filename not in file_categ:
             file_categ[filename] = set([])
-        if v.__dict__[variant_attribute]:
-            for y in v.__dict__[variant_attribute]:
-                if y != 'other':
-                    file_categ[filename].add(y)
+        value = v.__dict__[variant_attribute]
+        if value:
+            if isinstance(value, list):
+                for y in value:
+                    if y != 'other':
+                        file_categ[filename].add(y)
+            else:
+                if value != 'other':
+                    file_categ[filename].add(value)
         if v.transcript and v.normalized_consequence:
             for x in file_trans_consq:
                 if filename in x.split(';'):
@@ -987,6 +1081,7 @@ def update_file_combo_counts(
                 else:
                     incremented = True
                 if incremented:
+                    #print chrom, pos, file_combo_counts_categ, filegroup_combo
                     file_combo_counts[file_combo_counts_categ][
                         filegroup_combo
                     ] += 1
@@ -1257,17 +1352,34 @@ def create_html(html_outfile, image_dir, page_subtitle):
                     font-size:150%;
                 }
                 #title_area{
-                    margin: 50px;
+                    margin-top:50px;
+                    margin-bottom:50px;
+                    margin-left:150px;
+                    margin-right:50px
+                }
+                #sidebar{
+                    position:absolute;
+                    background-color:lightgray;
+                    padding:10px;
+                    width:120px;
+                    opacity:0.7;
+                }
+                a{
+                    text-decoration:none;
+                    color:black;
                 }
                 .databox{
-                    padding: 10px;
-                    margin: 20px;
+                    padding:10px;
+                    margin-top:20px;
+                    margin-bottom:20px;
+                    margin-left:150px;
+                    margin-right:20px;
                 }
                 .databox1{
-                    background-color: mistyrose;
+                    background-color:mistyrose;
                 }
                 .databox2{
-                    background-color: lavender;
+                    background-color:lavender;
                 }
                 </style>
                 <title>Annotator Comparison</title>
@@ -1279,10 +1391,26 @@ def create_html(html_outfile, image_dir, page_subtitle):
             '<h3>%s</h3></div>' %
             re.sub('\n', '<br>', page_subtitle)
         )
+
+        # sidebar
+        h2_headers = [
+            'Position Similarity', 'Transcript Similarity',
+            'Consequence Similarity', 'Normalized Consequence Heatmaps',
+            'Unnormalized Consequence Heatmaps'
+        ]
+        ids = [
+            'pos_similarity', 'transcr_similarity', 'consq_similarity',
+            'norm_consq_heatmaps', 'unnorm_consq_heatmaps'
+        ]
+        f.write('<div id="sidebar"><p>')
+        for i in xrange(len(h2_headers)):
+            f.write('<a href="#%s">%s</a><br><br>' % (ids[i], h2_headers[i]))
+        f.write('</p></div>')
         image_strs = {
             '_norm_heat':[], 'unnorm_heat':[], 'consq':[], 'other':[],
-            'transcr':[]
+            'transcr':[], 'position':[]
         }
+
         image_fnames = sorted(os.listdir(image_dir))
         for image in image_fnames:
             with open(os.path.join(image_dir, image)) as img_file:
@@ -1298,31 +1426,40 @@ def create_html(html_outfile, image_dir, page_subtitle):
                         other_img_str = False
                 if other_img_str:
                     image_strs['other'].append(image_str)
+        # position similarity
+        f.write(
+            '<div class="databox databox1" id="pos_similarity">'
+            '<h2>Position Similarity</h2>'
+        )
+        create_js_slideshow(image_strs['position'], 'position', f)
+        f.write('</div>')
 
         # transcript similarity
         f.write(
-            '<div class="databox databox2"><h2>Transcript Similarity</h2>'
+            '<div class="databox databox2" id="transcr_similarity">'
+            '<h2>Transcript Similarity</h2>'
         )
         create_js_slideshow(image_strs['transcr'], 'transcr', f)
         f.write('</div>')
 
         # consequence similarity
         f.write(
-            '<div class="databox databox1"><h2>Consequence Similarity</h2>'
+            '<div class="databox databox1" id ="consq_similarity">'
+            '<h2>Consequence Similarity</h2>'
         )
         create_js_slideshow(image_strs['consq'], 'consq', f)
         f.write('</div>')
 
         # consequence heatmaps
         f.write(
-            '<div class="databox databox2">'
+            '<div class="databox databox2" id="norm_consq_heatmaps">'
             '<h2>Normalized Consequence Heatmaps</h2>'
         )
         create_js_slideshow(image_strs['_norm_heat'], 'norm_heat', f)
         f.write('</div>')
 
         f.write(
-            '<div class="databox databox1">'
+            '<div class="databox databox1" id="unnorm_consq_heatmaps">'
             '<h2>Unnormalized Consequence Heatmaps</h2>'
         )
         create_js_slideshow(image_strs['unnorm_heat'], 'unnorm_heat', f)
