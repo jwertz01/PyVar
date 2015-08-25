@@ -22,7 +22,8 @@ import base64
 class Variant(object):
     def __init__(
         self, string=None, chrom=None, start_pos=None, end_pos=None,
-        consequence=None, normalized_consequence=None, transcript=None
+        consequence=None, normalized_consequence=None, transcript=None,
+        ref=None, alt=None
     ):
         self.string = string
         self.chrom = chrom
@@ -31,6 +32,8 @@ class Variant(object):
         self.consequence = consequence
         self.normalized_consequence = normalized_consequence
         self.transcript = transcript
+        self.ref = ref
+        self.alt = alt
 
     def __str__(self):
         return str(self.__dict__)
@@ -94,6 +97,10 @@ class AnvMultiannoTxt(AnnotationFile):
             v.transcript = [
                 z.split(':')[1] for z in var_list[aa_change_index].split(',')
             ]
+        if 'Ref' in h:
+            v.ref = var_list[h.index('Ref')]
+        if 'Alt' in h:
+            v.alt = var_list[h.index('Alt')]
 
 
 class AnvMultiannoCSV(AnnotationFile):
@@ -140,6 +147,12 @@ class AnvMultiannoCSV(AnnotationFile):
                 z.split(':')[1] for z in
                 var_list[aa_change_index].strip(',').split(',')
             ]
+        if 'Ref' in h:
+            v.ref = var_list[h.index('Ref')]
+        if 'Alt' in h:
+            v.alt = var_list[h.index('Alt')]
+        elif 'Obs' in h:
+            v.alt = var_list[h.index('Obs')]
 
 
 class AnvVariantFunction(AnnotationFile):
@@ -164,6 +177,8 @@ class AnvVariantFunction(AnnotationFile):
             # remove everything in parentheses
             re.sub(r'\([^\)]*\)', '', var_list[1]).split(',')
         )
+        v.ref = var_list[5]
+        v.alt = var_list[6]
 
 
 class AnvExonicVariantFunction(AnnotationFile):
@@ -188,6 +203,9 @@ class AnvExonicVariantFunction(AnnotationFile):
             v.transcript = [
                 z.split(':')[1] for z in var_list[2].strip(',').split(',')
             ]
+        v.ref = var_list[6]
+        v.alt = var_list[7]
+
 
 class VEPTxt(AnnotationFile):
     """VEP output text file."""
@@ -214,6 +232,8 @@ class VEPTxt(AnnotationFile):
             var_list[h.index('Feature_type')] == 'Transcript'
         ):
             v.transcript = [var_list[h.index('Feature')].split('.')[0]]
+        if 'Allele' in h:
+            v.alt = var_list[h.index('Allele')]
 
 
 class VarSeqTxt(AnnotationFile):
@@ -242,10 +262,11 @@ class VarSeqTxt(AnnotationFile):
         # make start pos match with other annotators
         if any(['insertion' in z for z in v.consequence]):
             v.start_pos -= 1
-        if 'Ref/Alt' in h and '/' in var_list[h.index('Ref/Alt')]:
+        elif 'Ref/Alt' in h and '/' in var_list[h.index('Ref/Alt')]:
             ref, alt = var_list[h.index('Ref/Alt')].split('/')[:2]
-            # frameshift insertion
-            if ref == '-' and 'frameshift_variant' in v.consequence:
+            v.ref = ref
+            v.alt = alt
+            if ref == '-':
                 v.start_pos -=1
 
 
@@ -341,6 +362,7 @@ def main():
             os.remove(os.path.join(image_dir, f_name))
 
     # output
+    print 'Creating plots...'
     filegroup_count = len(grouped_files)
     set_labels = tuple(sorted(grouped_files))
     set_labels_wrapped = tuple(
@@ -364,7 +386,6 @@ def main():
         'coral', 'greenyellow', 'hotpink', 'rosybrown', 'mediumpurple'
     ]
 
-    print file_combo_counts
     create_pie_chart(
         'Common Positions',
         'Percentage of variants for which annotators agree on\nposition '
@@ -467,6 +488,10 @@ def main():
     )
     if image_dir == '.image_files_temp':
         shutil.rmtree(image_dir)
+    print (
+        'Finished processing. Output files: %s, %s.' %
+        (args.out_html_filepath, args.out_txt_filepath)
+    )
 
 
 def get_norm_consequence(annotator, consequence, other_consequence):
@@ -810,9 +835,9 @@ def init_files(files, out_filename, file_groups):
 
     out_f = open(out_filename, 'w')
     out_f.write(
-        'Annotator\tFilename\tChrom\tStart_pos\tEnd_pos\tConsequence\t'
-        'Normalized_consequence\tTranscript\tCommon_position_exists\t'
-        'Common_transcript_exists\tConsequences_match'
+        'Annotator\tFilename\tChrom\tStart_pos\tEnd_pos\tRef\tAlt\t'
+        'Consequence\tNormalized_consequence\tTranscript\t'
+        'Common_position_exists\tCommon_transcript_exists\tConsequences_match'
     )
     return (
         out_f, empty_files, file_combo_counts, grouped_files, all_norm_consq
@@ -830,8 +855,6 @@ def process_files(files, out_file, file_combo_counts):
             z.next_variant.chrom for z in files if not z.eof
         ])
         if old_min_chrom != min_chrom:
-            # if old_min_chrom > 0:
-            #     sys.exit(1)
             print 'Processing %s...' % min_chrom
         old_min_pos = min_pos
         min_pos = min([
@@ -930,10 +953,11 @@ def process_curr_pos(variants_curr_pos, out_file, file_combo_counts):
             )
     for v, f in variants_curr_pos:
         out_file.write(
-            '%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n' % (
+            '%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' % (
                 f.annotator, os.path.basename(f.file_obj.name),
-                v.chrom, v.start_pos, v.end_pos, ', '.join(v.consequence),
-                ', '.join(v.normalized_consequence),
+                v.chrom, v.start_pos, v.end_pos,
+                v.ref if v.ref else 'NA', v.alt if v.alt else 'NA',
+                ', '.join(v.consequence), ', '.join(v.normalized_consequence),
                 ', '.join(v.transcript) if v.transcript else 'unknown',
                 common_pos_exists, common_transcr_exists, matching_norm_consq
             )
