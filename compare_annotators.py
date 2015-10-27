@@ -237,7 +237,7 @@ class VEPTxt(AnnotationFile):
 
 
 class VarSeqTxt(AnnotationFile):
-    """VEP output text file."""
+    """VarSeq output text file."""
     def __init__(self, file_obj=None):
         super(VarSeqTxt, self).__init__(
             annotator='varseq', delimiter='\t', file_obj=file_obj,
@@ -259,7 +259,7 @@ class VarSeqTxt(AnnotationFile):
             v.transcript = [
                 var_list[h.index('Transcript Name')].split('.')[0]
             ]
-        # make start pos match with other annotators
+        # make start pos match with other annotators (insertions)
         if any(['insertion' in z for z in v.consequence]):
             v.start_pos -= 1
         elif 'Ref/Alt' in h and '/' in var_list[h.index('Ref/Alt')]:
@@ -267,7 +267,58 @@ class VarSeqTxt(AnnotationFile):
             v.ref = ref
             v.alt = alt
             if ref == '-':
-                v.start_pos -=1
+                v.start_pos -= 1
+                v.end_pos -= 1
+
+class SnpEffVcf(AnnotationFile):
+    """SnpEff output VCF file."""
+    def __init__(self, file_obj=None):
+        super(SnpEffVcf, self).__init__(
+            annotator='snpeff', delimiter='\t', file_obj=file_obj,
+            has_header=True
+        )
+        self.info_header = None
+    def parse_info_header(self, header_str):
+        header_str = header_str[
+            header_str.index('"Functional annotations:') +
+            len('"Functional annotations:'):
+        ].strip().strip('>').strip('"').strip().strip('\'')
+        header_list = [z.strip() for z in header_str.split('|')]
+        self.info_header = header_list
+    def process_next_variant(self):
+        v = self.next_variant
+        h = self.header_list
+        var_list = v.string.split(self.delimiter)
+        v.chrom = var_list[h.index('#CHROM')]
+        v.start_pos = int(var_list[h.index('POS')])
+        v.end_pos = int(var_list[h.index('POS')])
+        info = var_list[h.index('INFO')]
+        info = info[info.index('ANN=') + 4:]
+        info = [z.split('|') for z in info.split(',')]
+        v.consequence = list(set(
+            [z[self.info_header.index('Annotation')] for z in info]
+        ))
+        l = []
+        for y in v.consequence:
+            for z in y.split('&'):
+                l.append(z)
+        v.consequence = l
+        v.normalized_consequence = get_norm_consequence(
+            self.annotator, v.consequence, self.other_consequence
+        )
+        v.transcript = list(set([
+            z[self.info_header.index('Feature_ID')].split('.')[0]
+            for z in info if (
+                (len(z) > self.info_header.index('Feature_Type')) and
+                (z[self.info_header.index('Feature_Type')] == 'transcript')
+            )
+        ]))
+        v.ref = var_list[h.index('REF')]
+        v.alt = var_list[h.index('ALT')]
+        # make start pos match with other annotators (deletions)
+        if len(v.ref) > len(v.alt):
+            v.start_pos += 1
+            v.end_pos += 1
 
 
 consequence_names = {
@@ -311,6 +362,7 @@ consequence_names = {
         'disruptive_inframe_insertion' : 'inframe_insertion',
         'inframe_deletion' : 'inframe_deletion',
         'disruptive_inframe_deletion' : 'inframe_deletion',
+        'start_lost' : 'nonsynonymous',
         'initiator_codon_variant' : 'nonsynonymous',
         'missense_variant' : 'nonsynonymous',
         'incomplete_terminal_codon_variant' : 'nonsynonymous',
@@ -323,11 +375,14 @@ consequence_names = {
         'downstream_gene_variant' : 'downstream',
         'intron_variant' : 'intron',
         'intergenic_variant' : 'intergenic',
+        'intergenic_region' : 'intergenic',
         'non_coding_transcript_exon_variant': 'nc_exon',
+        'non_coding_exon_variant': 'nc_exon',
         'non_coding_transcript_variant': 'nc_intron',
     },
 }
 consequence_names['varseq'] = consequence_names['vep']
+consequence_names['snpeff'] = consequence_names['vep']
 
 severity_ranking = [
     'frameshift', 'stopgain', 'stoploss', 'splicing', 'inframe_insertion',
@@ -558,9 +613,11 @@ def parse_arguments(parser):
     )
     parser.add_argument(
         '--varseq_txt_filenames', nargs='*',
-        help=(
-            'Tab-separated text files output by Golden Helix\'s VarSeq.'
-        )
+        help='Tab-separated text files output by Golden Helix\'s VarSeq.'
+    )
+    parser.add_argument(
+        '--snpeff_vcf_filenames', nargs='*',
+        help='VCF files output by SnpEff.'
     )
     parser.add_argument(
         '--filegroup_1', nargs='*', help=(
@@ -699,7 +756,7 @@ def parse_arguments(parser):
         else:
             other_paths.append((x, filetype))
 
-    detected_fgroups_str = '\nDetected filegroups\n-------------------\n'
+    detected_fgroups_str = '\nSpecified filegroups\n---------------------\n'
     if fg1_paths:
         detected_fgroups_str += '-Filegroup 1: %s\n' % '; '.join([
             '%s (%s)' % (fname, ftype[:ftype.index('_filenames')])
@@ -760,6 +817,7 @@ def open_files(args):
     )
     open_filetype(args.vep_txt_filenames, VEPTxt, files)
     open_filetype(args.varseq_txt_filenames, VarSeqTxt, files)
+    open_filetype(args.snpeff_vcf_filenames, SnpEffVcf, files)
     return files
 
 
@@ -777,7 +835,13 @@ def init_files(files, out_filename, file_groups):
     for i, f in enumerate(files):
         if f.has_header:
             for row in f.file_obj:
-                if not row.strip().startswith('##'):
+                if row.strip().startswith('##'):
+                    if (
+                        isinstance(f, SnpEffVcf) and
+                        row.strip().startswith('##INFO=<ID=ANN')
+                    ):
+                        f.parse_info_header(row)
+                else:
                     break
             f.header_list = row.strip().split(f.delimiter)
         try:
