@@ -325,7 +325,7 @@ consequence_names = {
     'annovar': {
         'frameshift deletion' : 'frameshift',
         'frameshift insertion' : 'frameshift',
-        'frameshift_block_subsitution' : 'frameshift',
+        'frameshift_block_substitution' : 'frameshift',
         'stopgain' : 'stopgain',
         'stopgain SNV' : 'stopgain',
         'stoploss' : 'stoploss',
