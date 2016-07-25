@@ -179,6 +179,10 @@ class AnvVariantFunction(AnnotationFile):
         )
         v.ref = var_list[5]
         v.alt = var_list[6]
+        # make start pos match with other annotators (deletions)
+        if v.alt and v.alt == '-':
+            v.start_pos -= 1
+            v.end_pos -= 1
 
 
 class AnvExonicVariantFunction(AnnotationFile):
@@ -205,10 +209,14 @@ class AnvExonicVariantFunction(AnnotationFile):
             ]
         v.ref = var_list[6]
         v.alt = var_list[7]
+        # make start pos match with other annotators (deletions)
+        if v.alt and v.alt == '-':
+            v.start_pos -= 1
+            v.end_pos -= 1
 
 
 class VEPTxt(AnnotationFile):
-    """VEP output text file."""
+    """Variant Effect Predictor output text file."""
     def __init__(self, file_obj=None):
         super(VEPTxt, self).__init__(
             annotator='vep', delimiter='\t', file_obj=file_obj,
@@ -234,41 +242,56 @@ class VEPTxt(AnnotationFile):
             v.transcript = [var_list[h.index('Feature')].split('.')[0]]
         if 'Allele' in h:
             v.alt = var_list[h.index('Allele')]
+        # make start pos match with other annotators (deletions)
+        if v.alt and v.alt == '-':
+            v.start_pos -= 1
+            v.end_pos -= 1
 
 
-class VarSeqTxt(AnnotationFile):
-    """VarSeq output text file."""
+class VEPVcf(AnnotationFile):
+    """Variant Effect Predictor output VCF file."""
     def __init__(self, file_obj=None):
-        super(VarSeqTxt, self).__init__(
-            annotator='varseq', delimiter='\t', file_obj=file_obj,
+        super(VEPVcf, self).__init__(
+            annotator='vep', delimiter='\t', file_obj=file_obj,
             has_header=True
         )
+        self.info_header = None
+    def parse_info_header(self, header_str):
+        header_list = header_str[
+            header_str.index('Format: ') + len('Format: '):
+        ].strip().strip('>').strip('"').split('|')
+        self.info_header = header_list
     def process_next_variant(self):
         v = self.next_variant
         h = self.header_list
         var_list = v.string.split(self.delimiter)
-        loc = var_list[h.index('Chr:Pos')].split(':')
-        v.chrom = 'chr%s' % loc[0]
-        v.start_pos = int(loc[1])
-        v.end_pos = int(loc[1])
-        v.consequence = [var_list[h.index('Sequence Ontology (Combined)')]]
+        v.chrom = var_list[h.index('#CHROM')]
+        v.start_pos = int(var_list[h.index('POS')])
+        v.end_pos = int(var_list[h.index('POS')])
+        info = var_list[h.index('INFO')]
+        info = info[info.index('CSQ=') + 4:]
+        info = [z.split('|') for z in info.split(',')]
+        v.consequence = list(set(
+            [z[self.info_header.index('Consequence')] for z in info]
+        ))
+        l = []
+        for y in v.consequence:
+            for z in y.split('&'):
+                l.append(z)
+        v.consequence = l
         v.normalized_consequence = get_norm_consequence(
             self.annotator, v.consequence, self.other_consequence
         )
-        if var_list[h.index('Transcript Name')].strip():
-            v.transcript = [
-                var_list[h.index('Transcript Name')].split('.')[0]
-            ]
-        # make start pos match with other annotators (insertions)
-        if any(['insertion' in z for z in v.consequence]):
-            v.start_pos -= 1
-        elif 'Ref/Alt' in h and '/' in var_list[h.index('Ref/Alt')]:
-            ref, alt = var_list[h.index('Ref/Alt')].split('/')[:2]
-            v.ref = ref
-            v.alt = alt
-            if ref == '-':
-                v.start_pos -= 1
-                v.end_pos -= 1
+        v.transcript = list(set([
+            z[self.info_header.index('Feature')].split('.')[0]
+            for z in info if (
+                (len(z) > self.info_header.index('Feature')) and
+                (z[self.info_header.index('Feature_type')] == 'Transcript')
+            )
+        ]))
+        v.ref = var_list[h.index('REF')]
+        v.alt = var_list[h.index('ALT')]
+
 
 class SnpEffVcf(AnnotationFile):
     """SnpEff output VCF file."""
@@ -316,9 +339,9 @@ class SnpEffVcf(AnnotationFile):
         v.ref = var_list[h.index('REF')]
         v.alt = var_list[h.index('ALT')]
         # make start pos match with other annotators (deletions)
-        if len(v.ref) > len(v.alt):
-            v.start_pos += 1
-            v.end_pos += 1
+ #       if len(v.ref) > len(v.alt):
+ #           v.start_pos += 1
+ #           v.end_pos += 1
 
 
 consequence_names = {
@@ -381,7 +404,6 @@ consequence_names = {
         'non_coding_transcript_variant': 'nc_intron',
     },
 }
-consequence_names['varseq'] = consequence_names['vep']
 consequence_names['snpeff'] = consequence_names['vep']
 
 severity_ranking = [
@@ -612,12 +634,12 @@ def parse_arguments(parser):
         )
     )
     parser.add_argument(
-        '--varseq_txt_filenames', nargs='*',
-        help='Tab-separated text files output by Golden Helix\'s VarSeq.'
-    )
-    parser.add_argument(
         '--snpeff_vcf_filenames', nargs='*',
         help='VCF files output by SnpEff.'
+    )
+    parser.add_argument(
+        '--vep_vcf_filenames', nargs='*',
+        help='VCF files output by Ensembl Variant Effect Predictor.'
     )
     parser.add_argument(
         '--filegroup_1', nargs='*', help=(
@@ -816,8 +838,8 @@ def open_files(args):
         args.anv_exonic_var_func_filenames, AnvExonicVariantFunction, files
     )
     open_filetype(args.vep_txt_filenames, VEPTxt, files)
-    open_filetype(args.varseq_txt_filenames, VarSeqTxt, files)
     open_filetype(args.snpeff_vcf_filenames, SnpEffVcf, files)
+    open_filetype(args.vep_vcf_filenames, VEPVcf, files)
     return files
 
 
@@ -837,8 +859,10 @@ def init_files(files, out_filename, file_groups):
             for row in f.file_obj:
                 if row.strip().startswith('##'):
                     if (
-                        isinstance(f, SnpEffVcf) and
-                        row.strip().startswith('##INFO=<ID=ANN')
+                        (
+                            row.startswith('##INFO=<ID=ANN') or
+                            row.startswith('##INFO=<ID=CSQ')
+                        ) and 'vcf' in str(type(f)).lower()
                     ):
                         f.parse_info_header(row)
                 else:
@@ -1016,6 +1040,14 @@ def process_curr_pos(variants_curr_pos, out_file, file_combo_counts):
                 'normalized_consequence'
             )
     for v, f in variants_curr_pos:
+        # if not v.ref:
+        #     matching_refs = [
+        #         a.ref for a, b in variants_curr_pos if (
+        #             b.file_obj.name != f.file_obj.name and a.alt == v.alt
+        #         )
+        #     ]
+        #     if matching_refs:
+        #         v.ref = matching_refs[0]
         out_file.write(
             '%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' % (
                 f.annotator, os.path.basename(f.file_obj.name),
@@ -1268,6 +1300,12 @@ def create_pie_chart(
     categ_limit = 6
     min_percent = 3
     if len(most_freq) > categ_limit:
+        if not any([w[1] for w in most_freq]):
+            print (
+                'Error: No common transcripts between input files. '
+                'Please verify that input files use the same transcript set.'
+            )
+            sys.exit(1)
         percentages = [
             100.0 * z[1] / sum([w[1] for w in most_freq]) for z in most_freq
         ]
