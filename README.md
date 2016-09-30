@@ -1,4 +1,4 @@
-# annotator-comparison
+# PyVar
 
 Compares variant annotation files (e.g., from different annotators) and
 outputs an HTML file containing annotator comparison plots,
